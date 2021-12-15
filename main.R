@@ -41,7 +41,7 @@ if (CPLEX) {
                isComplete = FALSE, Parameters = read_lines("src/parameters.R")), 
           ResultsFile)
 } else {
-  attach(readRDS(ResultsFile))
+  list2env(readRDS(ResultsFile), envir = .GlobalEnv)
 }
 
 # Post-optimization calculations ------------------------------------------
@@ -55,4 +55,4 @@ if (!get0("isComplete", ifnotfound = FALSE)) { # If results are not complete, i.
 }
 
 # Make figures ------------------------------------------------------------
-source("src/Plots.R", print.eval=TRUE)
+source("src/Plots.R", print.eval = TRUE)
