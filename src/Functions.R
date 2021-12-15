@@ -263,8 +263,7 @@ GetSamples <- function(x = SeriesComplete, n = 1000, dup. = 5, AcceptLowerN = FA
   Y <- select(Y, -timedate, -Year, -Hour, -Month)
 }
 
-CalcResul1CVaR <- function(i, s, b = beta, Serie = SeriesComplete, multiplier = 1) {
-  out <- list()
+CalcResul1CVaR <- function(i, s, b = beta, Serie = Series, multiplier = 1) {
   Selection <- PlantResults$idExec == i & PlantResults$Sim == s
   PR <- PlantResults[Selection,]
   weight <- filter(ExecParam, idExec == i)$Weight
@@ -273,31 +272,50 @@ CalcResul1CVaR <- function(i, s, b = beta, Serie = SeriesComplete, multiplier = 
     (deframe(PR[PR$Type != "Load", Colu]) * multiplier) +
     as.matrix(Serie[deframe(PR[PR$Type == "Load", "Plant"])]) %*% 
     (deframe(PR[PR$Type == "Load", Colu])) 
-  out$VaR <- quantile(bal, 1 - b)
-  out$CVaR <- sapply(1:length(out$VaR), function(x) mean(bal[bal <= out$VaR[x]]))
-  out
+
+  out <- tibble(`Risk (%)` =  (1 - b) * 100, VaR = quantile(bal, 1 - b, type = 1))
+  mutate(out, CVaR = CalcCVaR(bal, b, UpperTail = FALSE))
 }
 
 CalcResulMCVaR <- function(result = MainResults, ...) { 
   # Calculate with beta value used in optimization
   func1 <- function(x) {
-    if (x %% 10 == 0) print(paste0("line: ", x, "/", nrow(result)))
+    if (x %% 100 == 0) print(paste0("line: ", x, "/", nrow(result)))
     bind_cols(idExec = result$idExec[x], Sim = result$Sim[x], 
               CalcResul1CVaR(result$idExec[x], 
                              result$Sim[x], 
                              left_join(result, select(ExecParam, idExec, Beta), by = "idExec")$Beta[x],
                              ...))
   }
-  res <- future_map_dfr(1:nrow(result), func1)
+  res <- map_dfr(1:nrow(result), func1)
   result[c("VaR", "CVaR")] <- res[c("VaR", "CVaR")]
   result
 }
 # Find value to multiply installed capacity to achieve a given level of risk.
-FindMultiplier <- function(i, s, b = 0.95, Serie = SeriesWindSolar) {
-  optimize(function(x) abs(CalcResul1CVaR(i, s, Serie, 
-                                          b = b, 
-                                          multiplier = x)$CVaR), 
-           interval = c(0, 100))$minimum
+FindMultiplier <- function(i, s, bs = 0.95, Serie = Series, ...) {
+  SubsettoCalc1CVaR <- function(i, s, Serie) {
+    Selection <- PlantResults$idExec == i & PlantResults$Sim == s
+    PR <- PlantResults[Selection,]
+    weight <- filter(ExecParam, idExec == i)$Weight
+    Colu <- ifelse(weight, "RelCaptoLoad", "Capacity")
+    SerMatrix <- as.matrix(Serie[deframe(PR[PR$Type != "Load", "Plant"])])
+    CapVector <- deframe(PR[PR$Type != "Load", Colu])
+    SerMatrixLoad <- as.matrix(Serie[deframe(PR[PR$Type == "Load", "Plant"])])
+    CapVectorLoad <- deframe(PR[PR$Type == "Load", Colu])
+    list(SerMatrix = SerMatrix, CapVector = CapVector, 
+         SerMatrixLoad = SerMatrixLoad, CapVectorLoad = CapVectorLoad)
+  }
+  CalcResul1CVaRMatrix <- function(MatX, MatY, multiplier = 1, b = beta) {
+    bal <- multiplier * MatX + MatY
+    CalcCVaR(bal, b, UpperTail = FALSE)
+  }
+  SData <- SubsettoCalc1CVaR(i, s, Serie)
+  MatX <- with(SData,  SerMatrix %*% CapVector)
+  MatY <- with(SData, SerMatrixLoad %*% (CapVectorLoad))
+  sapply(bs, function(bs) 
+    optimize(function(x) abs(CalcResul1CVaRMatrix(MatX, MatY, b = bs, 
+                                                  multiplier = x)), 
+             ...)$minimum)
 }
 
 # Bind a column to MainResults containing the multiplier
@@ -448,4 +466,21 @@ CalcCumDens <- function(vec, quant = 0.05) { # Calculate density value when cumu
   #cumsum(diff(dens$x) * dens$y)
   res <- Dens$y[sum(Area <= quant) + 2]
   res
+}
+
+CalcCVaR <- function(x, probs = 0.5, UpperTail = TRUE) {
+  # Based on http://www-iam.mathematik.hu-berlin.de/~romisch/SP01/Uryasev.pdf
+  sapply(probs, function(prob) {
+    if (!UpperTail) x <- -x
+    VaR <- quantile(x, prob, type = 1)
+    psi <- mean(x <= VaR)
+    lambda <- (psi - prob) / (1 - prob)
+    CVaRp <- mean(x[x > VaR])
+    if (is.nan(CVaRp)) {
+      lambda <- 1
+      CVaRp <- 0
+    }
+    (lambda * VaR + (1 - lambda) * CVaRp) * 
+      ifelse(UpperTail, 1, -1)
+  })
 }

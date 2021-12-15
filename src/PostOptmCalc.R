@@ -6,7 +6,7 @@ PlantResults <- mutate(left_join(PlantResults, select(ExecParam, idExec, Weight)
                        Wc = case_when(Weight ~ Value, !Weight ~ Value * CF.pos / AveLoad), .after = Value)
 PlantResults <- mutate(PlantResults, Wr = Wc * CF / CF.pos, RelCaptoLoad = Wc / CF.pos, .after = Wc) 
 MainResults <- left_join(select(MainResults, !any_of(c("SumWc", "SumWr", "SumRC2L", "SumCapacity"))), 
-                         group_by(filter(PlantResults, str_detect(Plant, "Demand", negate = TRUE)), idExec, Sim) %>% 
+                         group_by(filter(PlantResults, Type != "Load"), idExec, Sim) %>% 
                            summarise(SumWc = sum(Wc), SumWr = sum(Wr), SumRC2L = sum(RelCaptoLoad), 
                                      SumCapacity = sum(Capacity)), by = c("idExec", "Sim"))
 # Values both for weight and capacity. Keep original values 
@@ -77,21 +77,32 @@ if (NumThreads == 1) {
   plan(multisession, workers = NumThreads)
 }
 
-MultiplierResults <- select(MainResults, idExec, Sim)
+CalcList <- select(MainResults, idExec, Sim)
 
 Series <- Series %>% mutate(OrigDemand = Demand, FlatDemand = Demand * MaxLoad / AveLoad)
-for (i in 1:length(betas)) {
-  MultiplierResultsObs <- future_bind_column_Var_CVaR(MultiplierResults, betas[i], Serie = Series)
-  MultiplierResultsObs <- future_bind_column_multiplier(MultiplierResultsObs, betas[i], Serie = Series)
-}
-MultiplierResultsObs <- mutate(MultiplierResultsObs, MultLoadType = "Observed", .after = Sim)
+MultiplierResultsObs <- left_join(
+  future_pmap_dfr(CalcList, 
+                  function(idExec, Sim) tibble(idExec, Sim, CalcResul1CVaR(i = idExec, s = Sim, b = betas)), 
+                  .progress = TRUE),
+  future_pmap_dfr(CalcList, 
+                  function(idExec, Sim) tibble(idExec, Sim, `Risk (%)` = (1 - betas) * 100, 
+                                               Multiplier = FindMultiplier(i = unique(idExec), s = unique(Sim), 
+                                                                           b = betas, interval = c(0, 100), tol = 1e-12)), 
+                  .progress = TRUE)
+) %>% mutate(MultLoadType = "Real", .after = Sim)
 
-# Series <- Series %>% mutate(OrigDemand = -1 * AveLoad / MaxLoad, FlatDemand = -1)
-# for (i in 1:length(betas)) {
-#   MultiplierResultsFlat <- future_bind_column_Var_CVaR(MultiplierResults, betas[i], Serie = Series)
-#   MultiplierResultsFlat <- future_bind_column_multiplier(MultiplierResultsFlat, betas[i], Serie = Series)
-# }
-# MultiplierResultsFlat <- mutate(MultiplierResultsFlat, MultLoadType = "Flat", .after = Sim)
+#Series <- Series %>% mutate(OrigDemand = -1 * AveLoad / MaxLoad, FlatDemand = -1)
+#MultiplierResultsFlat <- left_join(
+#  future_pmap_dfr(CalcList, 
+#                  function(idExec, Sim) tibble(idExec, Sim, CalcResul1CVaR(i = idExec, s = Sim, b = betas)), 
+#                  .progress = TRUE),
+#  future_pmap_dfr(CalcList, 
+#                  function(idExec, Sim) tibble(idExec, Sim, `Risk (%)` = (1 - betas) * 100, 
+#                                               Multiplier = FindMultiplier(i = unique(idExec), s = unique(Sim), 
+#                                                                           b = betas, interval = c(0, 100), tol = 1e-12)), 
+#                  .progress = TRUE)
+#) %>% mutate(MultLoadType = "Flat", .after = Sim)
+
 plan(sequential)
 Series <- Series %>% mutate(OrigDemand = Demand, FlatDemand = -1)
 #MultiplierResults <- bind_rows(MultiplierResultsObs, MultiplierResultsFlat)
