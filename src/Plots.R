@@ -238,13 +238,13 @@ ggsave("Diversification-1.pdf", height = 12, width = 18, units = "cm")
 ## ----IsoRiskMultiplier
 beta <- 0.95
 Risk <- 1 - beta
-riskname <- sym(paste0("SameRiskMulti_", Risk * 100, "%"))
 LoadMName <- c("Wind and PV, flat load" = "Flat demand", "Wind and PV, real load" = "Observed demand")
 ggplot(left_join(ExecParam, MainResults) %>% 
-         select(-any_of(colnames(MultiplierResults %>% ungroup() %>% 
-                                   select(-c(idExec, Sim))))) %>% left_join(MultiplierResults) %>% 
-         filter(idExec %in% Selec, MultLoadType == "Observed"), 
-       aes(x = sqrt(W_Variance_no_Load) * !!riskname, y = W_Cost * !!riskname, 
+         select(-any_of(colnames(MultiplierResults %>% 
+                                   ungroup() %>% select(-c(idExec, Sim))))) %>% 
+         left_join(MultiplierResults, by = c("idExec", "Sim")) %>% 
+         filter(idExec %in% Selec, MultLoadType == "Real", `Risk (%)` == Risk * 100), 
+       aes(x = sqrt(W_Variance_no_Load) * Multiplier, y = W_Cost * Multiplier, 
            color = OptType)) + 
   geom_path() + theme_light() + 
   theme(legend.position = "bottom") + scale_y_log10(limits = c(NA, 800)) + 
@@ -259,9 +259,11 @@ PlotCodenames <- c("A2", "B2", "C2")
 PlotIds <- ExecParam[match(PlotCodenames, ExecParam$Codename), "idExec"][[1]]
 names(PlotCodenames) <- PlotIds
 Series <- Series %>% mutate(OrigDemand = Demand, FlatDemand = -1)
-x <- left_join(ExecParam, MainResults) %>% left_join(MultiplierResults %>% filter(MultLoadType == "Observed")) %>% 
+x <- left_join(ExecParam, MainResults) %>% 
+  left_join(MultiplierResults %>% filter(MultLoadType == "Real", `Risk (%)` == Risk * 100) %>% 
+              select(-c(VaR, CVaR))) %>% 
   filter(idExec %in% PlotIds, Sim %in% c(1, 25, 51)) %>% 
-  select(idExec, Sim, `SameRiskMulti_5%`)
+  select(idExec, Sim, Multiplier)
 SimuNames <- c(`1` = "Lowest",
                `25` = "Intermediate",
                `51` = "Highest")
@@ -270,7 +272,7 @@ balances <- map_dfr(1:nrow(x), # Balance with adjusted capacity
                     ~CalcResul1Balance(x[[., "idExec"]], 
                                        x[[., "Sim"]], 
                                        Series, 
-                                       x[[., "SameRiskMulti_5%"]])) %>% 
+                                       x[[., "Multiplier"]])) %>% 
   rename(BalanceSame = Balance)
 balances <- left_join(balances, map_dfr(1:nrow(x), ~CalcResul1Balance(x[[., "idExec"]], # Balance with original capacity
                                                                       x[[., "Sim"]],
