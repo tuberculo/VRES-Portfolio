@@ -1,6 +1,6 @@
 # VRES-Portfolio
 
-This repository contains code that reproduces the results of the paper *Improvements to Modern Portfolio Theory based models applied to electricity systems*. Pre-print is available at: <https://arxiv.org/abs/2105.08182>.
+This repository contains code that reproduces the results of the paper *Improvements to Modern Portfolio Theory based models applied to electricity systems*. Pre-print is available at: <https://arxiv.org/abs/2105.08182>. Published version is available at https://doi.org/10.1016/j.eneco.2022.106047. 
 
 #### Abstract:
 
